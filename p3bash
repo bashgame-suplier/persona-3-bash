@@ -1,0 +1,295 @@
+#!/bin/bash
+# Persona 3 Bash Port - Maze Tartarus Walker with Staircase, Chasing Shadows, Igor, Daytime
+
+width=20
+height=10
+player_x=1
+player_y=$((height-1))
+
+hp=30
+sp=20
+floor=1
+persona="Orpheus"
+links=0
+
+# Persona pool
+personas=("Orpheus" "Pixie" "Jack Frost" "Angel" "Pyro Jack" "Apsaras" "Nekomata" "Oberon" "Succubus" "Valkyrie" "Thanatos")
+
+heal_items=3
+sp_items=2
+
+declare -A maze
+declare -A sprites
+shadows_x=()
+shadows_y=()
+stair_x=0
+stair_y=0
+
+generate_maze() {
+  for ((y=0; y<height; y++)); do
+    for ((x=0; x<width; x++)); do
+      if [[ $x -eq 0 || $y -eq 0 || $x -eq $((width-1)) || $y -eq $((height-1)) ]]; then
+        maze["$x,$y"]="#"
+      else
+        if (( RANDOM % 5 == 0 )); then
+          maze["$x,$y"]="#"
+        else
+          maze["$x,$y"]="."
+        fi
+      fi
+    done
+  done
+  # Ensure player start tile is open + carve exits
+  maze["$player_x,$player_y"]="."
+  maze["$((player_x+1)),$player_y"]="."
+  maze["$((player_x-1)),$player_y"]="."
+  maze["$player_x,$((player_y-1))"]="."
+  maze["$player_x,$((player_y+1))"]="."
+
+  # Place staircase (>) and carve exits
+  stair_x=$((RANDOM % (width-2) + 1))
+  stair_y=$((RANDOM % (height-2)))
+  maze["$stair_x,$stair_y"]=">"
+  maze["$((stair_x+1)),$stair_y"]="."
+  maze["$((stair_x-1)),$stair_y"]="."
+  maze["$stair_x,$((stair_y+1))"]="."
+  maze["$stair_x,$((stair_y-1))"]="."
+}
+
+spawn_sprites() {
+  sprites=()
+  shadows_x=()
+  shadows_y=()
+  for i in {1..4}; do
+    x=$((RANDOM % (width-2) + 1))
+    y=$((RANDOM % (height-2)))
+    # Avoid placing on the staircase or player
+    if [[ "$x,$y" == "$stair_x,$stair_y" || "$x,$y" == "$player_x,$player_y" ]]; then
+      continue
+    fi
+    case $((RANDOM % 3)) in
+      0) sprites["$x,$y"]="*";;
+      1) sprites["$x,$y"]="P";;
+      2) shadows_x+=("$x"); shadows_y+=("$y");;
+    esac
+  done
+}
+
+draw_maze() {
+  clear
+  echo "=== Tartarus Floor $floor ==="
+  for ((y=0; y<height; y++)); do
+    line=""
+    for ((x=0; x<width; x++)); do
+      if [[ $x -eq $player_x && $y -eq $player_y ]]; then
+        line+="@"
+      else
+        found=0
+        for i in "${!shadows_x[@]}"; do
+          if [[ ${shadows_x[$i]} -eq $x && ${shadows_y[$i]} -eq $y ]]; then
+            line+="S"; found=1; break
+          fi
+        done
+        if [[ $found -eq 0 ]]; then
+          if [[ -n "${sprites["$x,$y"]}" ]]; then
+            line+="${sprites["$x,$y"]}"
+          else
+            line+="${maze["$x,$y"]}"
+          fi
+        fi
+      fi
+    done
+    echo "$line"
+  done
+  echo "HP=$hp SP=$sp Persona=$persona Links=$links Heal=$heal_items SPitems=$sp_items"
+  echo "[w/a/s/d] move  [i]gor  [t]daytime  [q]quit"
+}
+
+battle() {
+  echo "A Shadow caught you!"
+  enemy_hp=$((8 + RANDOM % 8))
+  while [[ $enemy_hp -gt 0 && $hp -gt 0 ]]; do
+    echo "[a]ttack [p]ersona [m]item"
+    read -n1 choice
+    case $choice in
+      a)
+        dmg=$((2 + RANDOM % 5))
+        enemy_hp=$((enemy_hp - dmg))
+        echo "You strike for $dmg! Enemy HP=$enemy_hp"
+        ;;
+      p)
+        if [[ $sp -gt 0 ]]; then
+          if [[ $persona == "Thanatos" ]]; then
+            pdmg=$((10 + RANDOM % 10))
+            sp=$((sp - 2))
+            echo "Thanatos unleashes deathly power! $pdmg dmg!"
+          else
+            pdmg=$((5 + RANDOM % 8))
+            sp=$((sp - 3))
+            echo "$persona unleashes power! $pdmg dmg!"
+          fi
+          enemy_hp=$((enemy_hp - pdmg))
+        else
+          echo "Not enough SP!"
+        fi
+        ;;
+      m)
+        echo "Use [h]eal or [s]p item?"
+        read -n1 item_choice
+        case $item_choice in
+          h)
+            if [[ $heal_items -gt 0 ]]; then
+              heal_items=$((heal_items-1)); hp=$((hp+10))
+              echo "Heal item used! HP=$hp"
+            else
+              echo "No Heal items left!"
+            fi
+            ;;
+          s)
+            if [[ $sp_items -gt 0 ]]; then
+              sp_items=$((sp_items-1)); sp=$((sp+10))
+              echo "SP item used! SP=$sp"
+            else
+              echo "No SP items left!"
+            fi
+            ;;
+        esac
+        ;;
+    esac
+    if [[ $enemy_hp -gt 0 ]]; then
+      edmg=$((1 + RANDOM % 4))
+      hp=$((hp - edmg))
+      echo "Shadow hits you for $edmg! HP=$hp"
+    fi
+  done
+  if [[ $enemy_hp -le 0 ]]; then
+    links=$((links+1))
+    echo "Shadow defeated! Social Link grows. Links=$links"
+  fi
+  sleep 2
+}
+
+move_shadows() {
+  for i in "${!shadows_x[@]}"; do
+    # Step toward player
+    if [[ ${shadows_x[$i]} -lt $player_x ]]; then ((shadows_x[$i]++)); fi
+    if [[ ${shadows_x[$i]} -gt $player_x ]]; then ((shadows_x[$i]--)); fi
+    if [[ ${shadows_y[$i]} -lt $player_y ]]; then ((shadows_y[$i]++)); fi
+    if [[ ${shadows_y[$i]} -gt $player_y ]]; then ((shadows_y[$i]--)); fi
+    # Collision triggers battle
+    if [[ ${shadows_x[$i]} -eq $player_x && ${shadows_y[$i]} -eq $player_y ]]; then
+      battle
+      # Respawn shadow somewhere open (not on player or stair)
+      nx=$((RANDOM % (width-2) + 1))
+      ny=$((RANDOM % (height-2)))
+      shadows_x[$i]=$nx
+      shadows_y[$i]=$ny
+    fi
+  done
+}
+
+igor_phase() {
+  echo "You enter the Velvet Room..."
+  sleep 1
+  rand=$((RANDOM % ${#personas[@]}))
+  persona=${personas[$rand]}
+  echo "Igor grants you a new Persona: $persona!"
+  sleep 2
+}
+
+social_phase() {
+  echo "Daytime: strengthen Social Links."
+  echo "[s]tudy  [f]riend  [r]est"
+  read -n1 choice
+  case $choice in
+    s)
+      links=$((links+1))
+      echo "You studied. Knowledge grows."
+      sleep 1
+      ;;
+    f)
+      links=$((links+2))
+      echo "You hung out with friends. Bond deepens."
+      sleep 1
+      ;;
+    r)
+      hp=30
+      sp=20
+      echo "You rested. HP and SP restored."
+      sleep 1
+      ;;
+  esac
+}
+
+reward_item() {
+  if (( RANDOM % 2 == 0 )); then
+    heal_items=$((heal_items+1))
+    echo "You found a Heal item!"
+  else
+    sp_items=$((sp_items+1))
+    echo "You found an SP item!"
+  fi
+  sleep 1
+}
+
+# Initialize
+generate_maze
+spawn_sprites
+
+while [[ $hp -gt 0 ]]; do
+  draw_maze
+  echo -n "Move (w/a/s/d), Igor (i), Daytime (t), Quit (q): "
+  read -n1 input
+  case $input in
+    w)
+      if [[ ${maze["$player_x,$((player_y-1))"]} != "#" ]]; then ((player_y--)); fi
+      ;;
+    s)
+      if [[ ${maze["$player_x,$((player_y+1))"]} != "#" ]]; then ((player_y++)); fi
+      ;;
+    a)
+      if [[ ${maze["$((player_x-1)),$player_y"]} != "#" ]]; then ((player_x--)); fi
+      ;;
+    d)
+      if [[ ${maze["$((player_x+1)),$player_y"]} != "#" ]]; then ((player_x++)); fi
+      ;;
+    i)
+      igor_phase
+      ;;
+    t)
+      social_phase
+      ;;
+    q)
+      echo "You leave Tartarus."
+      exit
+      ;;
+  esac
+
+  move_shadows
+
+  key="$player_x,$player_y"
+  if [[ ${maze[$key]} == ">" ]]; then
+    floor=$((floor+1))
+    player_x=1
+    player_y=$((height-1))
+    echo "You ascend the staircase to floor $floor..."
+    reward_item
+    generate_maze
+    spawn_sprites
+    sleep 1
+  fi
+
+  if [[ -n "${sprites[$key]}" ]]; then
+    case ${sprites[$key]} in
+      "*")
+        reward_item
+        ;;
+      "P")
+        igor_phase
+        ;;
+    esac
+    unset sprites[$key]
+  fi
+done
+
+echo "You collapse in Tartarus... Memento Mori."
